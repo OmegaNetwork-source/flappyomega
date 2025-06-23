@@ -372,6 +372,10 @@
         // Event listeners
         function handleUserInput() {
             if (gameState === 'start') {
+                // Deduct 5 credits from localStorage
+                let credits = parseInt(localStorage.getItem('omega_arcade_credits') || '0', 10);
+                credits = Math.max(0, credits - 5);
+                localStorage.setItem('omega_arcade_credits', credits);
                 resetGame();
             } else if (gameState === 'playing') {
                 flap();
@@ -513,6 +517,14 @@
             event.stopPropagation(); // Prevent click from bubbling up
             exportToCSV();
         });
+
+        // Arcade credit check: redirect if not enough credits
+        (function() {
+            const credits = parseInt(localStorage.getItem('omega_arcade_credits') || '0', 10);
+            if (!credits || credits < 5) {
+                window.location.href = 'arcade-entry.html';
+            }
+        })();
 
         // Initial load
         window.addEventListener('load', () => {
