@@ -156,7 +156,7 @@
             <div id="gameOverMessage" class="message-box">
                 <h2>Game Over</h2>
                 <p>Score: <span id="finalScore">0</span></p>
-                <button onclick="location.reload()">Play Again</button>
+                <button id="playAgainBtn" class="web3-btn">Play Again</button>
                 <button id="submitScoreBtn" class="web3-btn" style="display: none;">Submit Score</button>
                 <p style="font-size: 0.8em; color: #999; margin-top: 10px;">Note: Wallet must be reconnected for a new game.</p>
             </div>
@@ -191,21 +191,18 @@
             toggleSizeBtn.textContent = 'Extend Size';
         }
 
-        toggleSizeBtn.addEventListener('click', (event) => {
-            event.stopPropagation(); // Prevent click from starting the game
-            if (localStorage.getItem('extendedView') === 'true') {
-                localStorage.setItem('extendedView', 'false');
-            } else {
-                localStorage.setItem('extendedView', 'true');
-            }
-            location.reload();
-        });
-
         canvas.width = gameContainer.clientWidth;
         canvas.height = gameContainer.clientHeight;
 
         // Game state
         let gameState = 'start'; // 'start', 'playing', 'over'
+
+        // Time-based physics for consistent speed across devices
+        let lastTime = 0;
+        const BIRD_GRAVITY = 800;  // pixels per second per second
+        const BIRD_LIFT = -320;     // pixels per second
+        const PIPE_SPEED = 140;      // pixels per second
+        const PIPE_SPAWN_INTERVAL = 2.2; // seconds
 
         // Game variables
         const bird = {
@@ -213,8 +210,6 @@
             y: canvas.height / 2,
             radius: 15,
             velocity: 0,
-            gravity: 0.05, // Final, extremely low gravity
-            lift: -2.2,    // Final, extremely soft flap
             color: '#00ffff',
             shadowColor: 'rgba(0, 255, 255, 0.7)'
         };
@@ -222,10 +217,8 @@
         const pipes = {
             list: [],
             width: 50,
-            gap: 300,      // Final, very wide gap
-            spawnInterval: 220, // Final, very slow spawn rate
-            frameCount: 0,
-            speed: 1.0,    // Final, very slow pipe speed
+            gap: 250,      // A reasonably challenging gap
+            spawnTimer: 0,
             color: '#ffffff',
             shadowColor: 'rgba(255, 255, 255, 0.7)'
         };
@@ -254,9 +247,9 @@
             ctx.restore();
         }
 
-        function updateBird() {
-            bird.velocity += bird.gravity;
-            bird.y += bird.velocity;
+        function updateBird(deltaTime) {
+            bird.velocity += BIRD_GRAVITY * deltaTime;
+            bird.y += bird.velocity * deltaTime;
 
             // Stop bird from falling off screen
             if (bird.y + bird.radius > canvas.height) {
@@ -271,9 +264,7 @@
         }
 
         function flap() {
-            if (gameState === 'playing') {
-                bird.velocity = bird.lift;
-            }
+            bird.velocity = BIRD_LIFT;
         }
 
         function drawPipes() {
@@ -283,31 +274,32 @@
             ctx.shadowBlur = 10;
             for (const p of pipes.list) {
                 // Top pipe
-                ctx.fillRect(p.x, 0, pipes.width, p.topHeight);
+                ctx.fillRect(p.x, 0, p.width, p.topHeight);
                 // Bottom pipe
-                ctx.fillRect(p.x, p.topHeight + pipes.gap, pipes.width, canvas.height - p.topHeight - pipes.gap);
+                ctx.fillRect(p.x, p.topHeight + pipes.gap, p.width, canvas.height - p.topHeight - pipes.gap);
             }
             ctx.restore();
         }
 
-        function updatePipes() {
-            pipes.frameCount++;
-            if (pipes.frameCount % pipes.spawnInterval === 0) {
+        function updatePipes(deltaTime) {
+            pipes.spawnTimer += deltaTime;
+            if (pipes.spawnTimer > PIPE_SPAWN_INTERVAL) {
+                pipes.spawnTimer = 0;
                 const topHeight = Math.random() * (canvas.height - pipes.gap - 150) + 75;
-                pipes.list.push({ x: canvas.width, topHeight: topHeight, passed: false });
+                pipes.list.push({ x: canvas.width, topHeight: topHeight, passed: false, width: pipes.width, gap: pipes.gap });
             }
 
             for (let i = pipes.list.length - 1; i >= 0; i--) {
                 const p = pipes.list[i];
-                p.x -= pipes.speed;
+                p.x -= PIPE_SPEED * deltaTime;
 
                 // Remove pipes that are off-screen
-                if (p.x + pipes.width < 0) {
+                if (p.x + p.width < 0) {
                     pipes.list.splice(i, 1);
                 }
                 
                 // Score
-                if (!p.passed && p.x + pipes.width < bird.x) {
+                if (!p.passed && p.x + p.width < bird.x) {
                     p.passed = true;
                     score++;
                     document.getElementById('scoreDisplay').textContent = score;
@@ -318,9 +310,9 @@
         function checkCollisions() {
             for (const p of pipes.list) {
                 // Check if bird is within the pipe's x-range
-                if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + pipes.width) {
+                if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + p.width) {
                     // Check for collision with top or bottom pipe
-                    if (bird.y - bird.radius < p.topHeight || bird.y + bird.radius > p.topHeight + pipes.gap) {
+                    if (bird.y - bird.radius < p.topHeight || bird.y + bird.radius > p.topHeight + p.gap) {
                         setGameOver();
                     }
                 }
@@ -343,20 +335,28 @@
             bird.y = canvas.height / 2;
             bird.velocity = 0;
             pipes.list = [];
-            pipes.frameCount = 100; // Start pipes after a small delay
+            pipes.spawnTimer = 0;
             score = 0;
             document.getElementById('scoreDisplay').textContent = score;
             document.getElementById('startMessage').style.display = 'none';
             document.getElementById('gameOverMessage').style.display = 'none';
+            flap(); // Give an initial flap to avoid instant drop
         }
 
-        function gameLoop() {
+        function gameLoop(timestamp) {
+            // Guard against NaN on the first frame.
+            if (!lastTime) {
+                lastTime = timestamp;
+            }
+            const deltaTime = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             if (gameState === 'playing') {
-                updateBird();
-                updatePipes();
+                updateBird(deltaTime);
+                updatePipes(deltaTime);
                 checkCollisions();
             } else {
                 // Make bird hover in start/over state
@@ -373,8 +373,7 @@
         function handleUserInput() {
             if (gameState === 'start') {
                 resetGame();
-            }
-            if (gameState === 'playing') {
+            } else if (gameState === 'playing') {
                 flap();
             }
         }
@@ -384,6 +383,27 @@
             e.preventDefault();
             handleUserInput();
         }, { passive: false });
+
+        toggleSizeBtn.addEventListener('click', (event) => {
+            event.stopPropagation(); // Prevent click from starting the game
+            if (localStorage.getItem('extendedView') === 'true') {
+                localStorage.setItem('extendedView', 'false');
+            } else {
+                localStorage.setItem('extendedView', 'true');
+            }
+            location.reload();
+        });
+
+        const playAgainBtn = document.getElementById('playAgainBtn');
+        playAgainBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            location.reload();
+        });
+        playAgainBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            location.reload();
+        });
 
         async function connectWallet() {
             if (typeof window.ethereum === 'undefined') {
@@ -495,8 +515,10 @@
         });
 
         // Initial load
-        window.addEventListener('load', fetchLeaderboard);
-        gameLoop();
+        window.addEventListener('load', () => {
+            fetchLeaderboard();
+            requestAnimationFrame(gameLoop);
+        });
     });
     </script>
 </body>
